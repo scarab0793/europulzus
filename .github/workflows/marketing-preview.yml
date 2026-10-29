@@ -1,0 +1,24 @@
+name: EuroPulses marketing preview ONLY
+on:
+  workflow_dispatch:
+  # No schedule or push trigger. Never publishes.
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Generate offline preview
+        run: python marketing.py --input index.html --output marketing-preview.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: europulses-marketing-preview
+          path: marketing-preview.json
+          retention-days: 7
