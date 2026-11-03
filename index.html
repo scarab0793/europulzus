@@ -211,7 +211,7 @@ footer li{break-inside:avoid;margin-bottom:6px;overflow-wrap:anywhere}
 <div class="grid">
 <main id="hirek">
   <section class="feedhead" aria-labelledby="feedtitle">
-    <h2 id="feedtitle"><span data-i="feedtitle">Hírfolyam országonként</span> <span class="tag" id="count"></span></h2>
+    <h2 id="feedtitle"><span data-i="feedtitle">Hírfolyam országonként</span></h2>
     <p class="sum" data-i="sum">Válassz országot vagy régiót, illetve keress a hírek között. Minden hír mellett ott a forrás linkje.</p>
     <div class="search"><label for="q" class="vh" data-i="q_label">Keresés a hírek között</label><input id="q" type="search" placeholder="Keresés: infláció, kamat, GDP, forint, költségvetés…" data-i-ph="q_ph" autocomplete="off"></div>
     <div class="filters" id="filters" role="group" aria-label="Országszűrő" data-i-aria="filters_aria"></div>
@@ -531,7 +531,6 @@ footer li{break-inside:avoid;margin-bottom:6px;overflow-wrap:anywhere}
         if(code!=='ALL'&&!counts[code])return;
         var b=el('button','chip');b.type='button';b.dataset.c=code;
         b.appendChild(document.createTextNode(code==='ALL'?T[lang].all:NAMES[lang][code]));
-        b.appendChild(el('span','n',String(counts[code]||0)));
         b.addEventListener('click',function(){state.c=code;state.n=60;
           try{history.replaceState(null,'','#'+code.toLowerCase())}catch(e){}
           render();});
@@ -561,8 +560,7 @@ footer li{break-inside:avoid;margin-bottom:6px;overflow-wrap:anywhere}
       return true});
     var feed=document.getElementById('feed');feed.innerHTML='';
     var label=state.c==='ALL'?D.allLabel:N[state.c];
-    document.getElementById('status').textContent=D.items(list.length)+' · '+label+(state.q?' · '+D.search+': '+D.q[0]+state.q+D.q[1]:'')+' · '+D.newest;
-    document.getElementById('count').textContent=D.items(DATA.length);
+    document.getElementById('status').textContent=label+(state.q?' · '+D.search+': '+D.q[0]+state.q+D.q[1]:'')+' · '+D.newest;
     if(!list.length){feed.appendChild(el('p','empty',D.empty));}
     var last=null;
     list.slice(0,state.n).forEach(function(i){
