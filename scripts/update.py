@@ -135,8 +135,9 @@ def gather_news(items):
              {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 40}]
     msgs = [{"role": "user", "content": prompt}]
     for _ in range(8):
-        r = client.beta.messages.create(model=MODEL, max_tokens=32000, tools=tools, messages=msgs,
-                                        betas=["web-fetch-2025-09-10"])
+        with client.beta.messages.stream(model=MODEL, max_tokens=32000, tools=tools, messages=msgs,
+                                         betas=["web-fetch-2025-09-10"]) as st:
+            r = st.get_final_message()
         if r.stop_reason == "pause_turn":
             msgs = [msgs[0], {"role": "assistant", "content": r.content}]; continue
         break
