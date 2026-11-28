@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Európulzus automatikus frissítés: EKB-árfolyamok + hírek (Anthropic API) -> index.html.
+"""Europulse automatikus frissítés: EKB-árfolyamok + hírek (Anthropic API) -> index.html.
 Csak a T.disc2-t, a hír-JSON-t, az árfolyamsávot és a hozzá tartozó dátumokat módosítja."""
 import json, os, re, subprocess, sys, tempfile, urllib.request, xml.etree.ElementTree as ET
 from datetime import date, datetime
@@ -7,19 +7,13 @@ from datetime import date, datetime
 HTML = os.environ.get("INDEX_HTML", "index.html")
 MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 TODAY = date.today()
-LANGS = ["en", "de", "fr", "es", "pl"]
 CODES = set("EU DE FR NL BE AT LU IE IT ES PT GR CY MT HU PL CZ SK RO BG HR SI SE DK FI EE LV LT CH NO".split())
 ECB_URLS = ["https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml",
             "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"]
 NEWS_RE = re.compile(r'(<script type="application/json" id="news-data">)(.*?)(</script>)', re.S)
 
-HU_M = "január február március április május június július augusztus szeptember október november december".split()
-HU_SHORT = ["jan.", "febr.", "márc.", "ápr.", "máj.", "jún.", "júl.", "aug.", "szept.", "okt.", "nov.", "dec."]
+MON = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
 EN_M = "January February March April May June July August September October November December".split()
-DE_M = "Januar Februar März April Mai Juni Juli August September Oktober November Dezember".split()
-FR_M = "janvier février mars avril mai juin juillet août septembre octobre novembre décembre".split()
-ES_M = "enero febrero marzo abril mayo junio julio agosto septiembre octubre noviembre diciembre".split()
-PL_M = "stycznia lutego marca kwietnia maja czerwca lipca sierpnia września października listopada grudnia".split()
 
 def log(*a): print(*a, file=sys.stderr)
 
@@ -45,7 +39,7 @@ def ecb_latest():
         if best is None or c.get("time") > best[0]: best = (c.get("time"), rates)
     return best
 
-def hu(v, n): return f"{v:.{n}f}".replace(".", ",")
+def hu(v, n): return f"{v:.{n}f}"
 
 def fx_values(r):
     usd, huf, gbp, chf, jpy = r["USD"], r["HUF"], r["GBP"], r["CHF"], r["JPY"]
@@ -72,23 +66,16 @@ def update_fx(html):
         if n != 2: raise SystemExit(f"FX-sor hiba: {pair} {n} találat")
     new, n = re.subn(r"Date\.UTC\(\d+,\d+,\d+\)", f"Date.UTC({y},{m-1},{dd})", new, count=1)
     if n != 1: raise SystemExit("Date.UTC nem található")
-    new, n = re.subn(r'(<span style="opacity:\.75;font-weight:400">)[^<]*(</span>)', r"\g<1>%s %d.\g<2>" % (HU_SHORT[m-1], dd), new, count=1)
+    new, n = re.subn(r'(<span style="opacity:\.75;font-weight:400">)[^<]*(</span>)', r"\g<1>%d %s\g<2>" % (dd, MON[m-1]), new, count=1)
     if n != 1: raise SystemExit("fx-label dátum nem található")
     return new, (d if new != html else None)
 
 # ---------- disc2 ----------
 def update_disc2(html):
-    d, m, y = TODAY.day, TODAY.month - 1, TODAY.year
-    t = [f"Összeállítva nyilvános hírforrásokból {y}. {HU_M[m]} {d}-én. Tájékoztató jellegű, nem befektetési tanácsadás.",
-         f"Compiled from public news sources on {d} {EN_M[m]} {y}. For information only, not investment advice.",
-         f"Zusammengestellt aus öffentlichen Nachrichtenquellen am {d}. {DE_M[m]} {y}. Nur zur Information, keine Anlageberatung.",
-         f"Compilé à partir de sources publiques le {d if d>1 else '1er'} {FR_M[m]} {y}. À titre informatif, ne constitue pas un conseil en investissement.",
-         f"Elaborado con fuentes públicas el {d} de {ES_M[m]} de {y}. Solo informativo, no constituye asesoramiento de inversión.",
-         f"Zestawiono z publicznych źródeł {d} {PL_M[m]} {y} r. Wyłącznie informacyjnie, nie stanowi porady inwestycyjnej."]
-    it = iter(t)
-    html, n = re.subn(r"disc2:'[^']*'", lambda _: "disc2:'%s'" % next(it), html)
-    if n != 6: raise SystemExit(f"disc2 T-kulcs: {n}")
-    html, n = re.subn(r'(data-i="disc2">)[^<]*(</p>)', lambda mo: mo[1] + t[0] + mo[2], html, count=1)
+    t = f"Compiled from public news sources on {TODAY.day} {EN_M[TODAY.month - 1]} {TODAY.year}. For information only, not investment advice."
+    html, n = re.subn(r"disc2:'[^']*'", lambda _: "disc2:'%s'" % t, html)
+    if n != 1: raise SystemExit(f"disc2 T-kulcs: {n}")
+    html, n = re.subn(r'(data-i="disc2">)[^<]*(</p>)', lambda mo: mo[1] + t + mo[2], html, count=1)
     if n != 1: raise SystemExit("disc2 HTML nem található")
     return html
 
@@ -104,26 +91,23 @@ def valid_item(x, seen):
         if not all(isinstance(x[k], str) and x[k].strip() for k in ("t", "s", "src", "u")): return False
         if not x["u"].startswith("http") or x["u"] in seen: return False
         if x["d"] > TODAY.isoformat(): return False
-        for l in LANGS:
-            v = x[l]
-            if not (isinstance(v, list) and len(v) == 2 and all(isinstance(s, str) and s.strip() for s in v)): return False
         return True
     except Exception:
         return False
 
-PROMPT = """Te az Európulzus (európai gazdasági hírportál) szerkesztője vagy. Ma {today}. A hírfolyam legfrissebb tétele {latest} napi.
-Gyűjts új, ellenőrizhető gazdasági híreket {latest}-tól (az utolsó napnál nézd meg, mi hiányzik) máig. Eszközök: web_search és web_fetch.
-Források, amik működnek: Portfolio listaoldalak (portfolio.hu/gazdasag, /deviza, /uzlet), Euronews (euronews.com/business), Eurostat, EKB, jegybankok, ANSA, Trading Economics, magyar portálok (Economx, VG, HVG, G7, Telex, Index, Mfor, Privátbankár, Bank360). Bloomberg és snbchf.com nem tölthető be.
-SZABÁLYOK
-- Csak olyan hírt vegyél fel, aminek a cikkoldalát a web_fetch-csel tényleg beolvastad, és a cikk dátuma pontosan ismert. A keresési kivonatból ne írj hírt. Számot ne találj ki. Ha a cikk dátuma nem egyezik az oldal dátumával, hagyd ki.
-- Saját szavakkal, szó szerinti átvétel nélkül, 1-2 mondatos összefoglaló. Ha egyetlen másodlagos forrásra épül („a WSJ szerint"), jelezd minden nyelven.
-- Országkódok: EU, DE, FR, NL, BE, AT, LU, IE, IT, ES, PT, GR, CY, MT, HU, PL, CZ, SK, RO, BG, HR, SI, SE, DK, FI, EE, LV, LT, CH, NO. Országonként egy-két hír, ha van; legfeljebb {maxn} hír összesen.
-- Ne ismételd a már meglévő URL-eket (lista lent).
-- Számformátum: HU 1,5 / 1 234; EN 1.5 / 1,234; DE és ES 1,5 / 1.234; FR és PL 1,5 / 1 234. A számok mindenhol egyezzenek.
-KIMENET: kizárólag egy JSON-tömb, semmi más szöveg, kódblokk nélkül. Elem:
-{{"d":"ÉÉÉÉ-HH-NN","c":"kód","t":"magyar cím","s":"magyar összefoglaló","src":"forrás neve","u":"cikk URL","en":["cím","összefoglaló"],"de":[..],"fr":[..],"es":[..],"pl":[..]}}
-Mind az öt fordítás kötelező, természetes és pontos. Ha nincs új hír, adj vissza üres tömböt: [].
-MÁR MEGLÉVŐ (utolsó 120) URL-ek:
+PROMPT = """You are the editor of Europulse, an English-language European business news portal. Today is {today}. The newest item in the feed is dated {latest}.
+Collect new, verifiable business news from {latest} (re-check the last day for gaps) up to today. Tools: web_search and web_fetch.
+Sources that work: Portfolio.hu list pages (portfolio.hu/gazdasag, /deviza, /uzlet), Euronews (euronews.com/business), Eurostat, ECB, central banks, ANSA, Trading Economics, Hungarian outlets (Economx, VG, HVG, G7, Telex, Index, Mfor, Privatbankar, Bank360). Bloomberg and snbchf.com cannot be loaded.
+RULES
+- Only include a story if you actually fetched the article page with web_fetch and its date is exactly known. Never write from search snippets. Never invent figures. Skip articles whose date does not match the page date.
+- Write in your own words in English, no verbatim copying, 1-2 sentence summary. If a story rests on a single secondary source ("according to the WSJ"), say so in the text.
+- Country codes: EU, DE, FR, NL, BE, AT, LU, IE, IT, ES, PT, GR, CY, MT, HU, PL, CZ, SK, RO, BG, HR, SI, SE, DK, FI, EE, LV, LT, CH, NO. One or two stories per country where available; at most {maxn} in total.
+- Do not repeat already listed URLs (below).
+- Number format: English (1.5, 1,234).
+OUTPUT: a single JSON array only, no other text, no code block. Item:
+{{"d":"YYYY-MM-DD","c":"code","t":"English headline","s":"English summary","src":"source name","u":"article URL"}}
+If there is no new story, return [].
+EXISTING (latest 120) URLs:
 {urls}"""
 
 def gather_news(items):
@@ -169,15 +153,13 @@ def verify(html):
     assert len(items) <= 820
     ds = [x["d"] for x in items]; assert ds == sorted(ds, reverse=True), "dátumsorrend"
     for x in items:
-        assert all(isinstance(x[l], list) and len(x[l]) == 2 for l in LANGS), x["u"]
+        assert set(x) == {"d", "c", "t", "s", "src", "u"}, x["u"]
     scripts = [s for s in re.findall(r"<script>(.*?)</script>", html, re.S)]
     for s in scripts:
         with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f: f.write(s)
         p = subprocess.run(["node", "--check", f.name], capture_output=True, text=True)
         os.unlink(f.name)
         assert p.returncode == 0, p.stderr
-    keys = [set(re.findall(r"(\w+):'", blk)) for blk in re.split(r"\n\s*(?:hu|en|de|fr|es|pl):\{", re.search(r"var T=\{.*?\n  \};", html, re.S)[0])[1:]]
-    assert len(keys) == 6 and all(k == keys[0] for k in keys), "T kulcsok eltérnek"
 
 def main():
     html = open(HTML, encoding="utf-8").read()
